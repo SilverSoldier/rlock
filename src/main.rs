@@ -1,11 +1,19 @@
 extern crate x11;
 extern crate pwd;
 extern crate libc;
+extern crate crypto;
 
 use std::ptr;
 use std::process::exit;
 use std::ffi::{ CStr, CString };
-use std::io::prelude;
+use std::error::Error;
+
+use std::fs::File;
+use std::io::prelude::*;
+use std::io;
+
+use crypto::digest::Digest;
+use crypto::md5::Md5;
 
 use x11::xlib::{
     Window,
@@ -14,15 +22,8 @@ use x11::xlib::{
 };
 
 use libc::{
-    getuid,
-    getpwuid,
-    __errno_location,
     strerror,
-    passwd,
     c_char,
-    strcmp,
-    spwd,
-    getspnam,
     group,
     uid_t,
     gid_t,
@@ -49,84 +50,100 @@ struct Xrandr {
     errbase: u32,
 }
 
-fn die(errstr: &str) {
-    println!("{}", errstr);
-    exit(1);
+fn readinput() -> String {
+    let mut input = String::new();
+    match io::stdin().read_line(&mut input) {
+        Ok(_) => input,
+        Err(msg) => panic!("Error reading input: {}", msg.description()),
+    }
 }
 
-/* Abandoned in order to use a shorter user defined password */
-fn gethash() -> *mut c_char {
-    let mut hash: *mut c_char;
-    let pw: *mut passwd = ptr::null_mut();
+fn createpwfile() -> String {
+    /* Prompt user for password */
+    print!("Enter password for screen lock: ");
+    std::io::stdout().flush().unwrap();
 
-    /* Check if the current user has a password entry */
-    unsafe {
-        /* Get user id of user who requested */
-        let uid = getuid();
-        // let uid = 1020;
-        let errno = __errno_location();
+    /* TODO: Input field should not display whatever is entered */
+    let pwd = readinput();
 
-        /* Get entry of this user from /etc/passwd */
-        let pw = getpwuid(uid);
+    /* Prompt user to re-enter password */
+    print!("Re-enter password to verify: ");
+    std::io::stdout().flush().unwrap();
 
-        /* Check if entry existed or not */
-        if pw.is_null() {
+    let pwd_verify = readinput();
 
-            /* If there is no errno print default message */
-            if let Some(0i32) = errno.as_ref().map(|x| *x) {
-                die("slock: cannot retrieve password entry\n");
-            }
-            else {
-                die(&CStr::from_ptr(strerror(*errno)).to_string_lossy().into_owned())
-            }
-        }
+    /* Verify both hashes */
 
-        println!("Reached checkpoint 2");
-        
-        hash = (*pw).pw_passwd;
-
-        /* Entry has x in passwd field if there exists a password for that user */
-        if strcmp(hash, CString::new("x").unwrap().as_ptr()) == 0 {
-            println!("Reached checkpoint 3");
-            let sp: *mut spwd;
-            println!("Name: {:?}",(*pw).pw_name);
-            sp = getspnam((*pw).pw_name);
-            println!("sp: {:?}",sp);
-            if sp.is_null() {
-                die("slock: getspnam: cannot retrieve shadow entry.\nMake sure to suid or sgid slock.\n");
-            }
-            else {
-                hash = (*sp).sp_pwdp;
-                print!("{:?}", hash);
-            }
-        }
-
+    if pwd != pwd_verify {
+        println!("Passwords do not match!. Try again.");
+        createpwfile();
     }
 
-    hash
+    /* Hash password that the user entered */
+    let mut digest = Md5::new();
+    digest.input_str(&pwd);
+    let hash = digest.result_str();
+    // print!("Hash: {}", hash);
+
+    /* Write to the pwd file */
+    let username: String;
+    unsafe{
+        let name = libc::getenv(CString::new("USER").unwrap().as_ptr());
+        username= CStr::from_ptr(name).to_string_lossy().into_owned();
+    }
+
+    let file_prefix = String::from("/home/");
+    let file_suffix = String::from("/.rlock_pwd");
+    let path = file_prefix + &username + &file_suffix;
+
+    match File::create(path.clone()) {
+        Ok(f) => {
+            let mut file = f;
+            match file.write_all(hash.as_bytes()){
+                Ok(_) => {
+                    println!("Successfully wrote to {}", path);
+                    hash
+                },
+                Err(msg) => {
+                    panic!("Error writing to file: {}",  msg);
+                }
+            }
+            /* Return the hash to the getpw function */
+        },
+        Err(msg) => {
+            panic!("Error creating file {}: {}", path, msg);
+        }
+    }
 }
 
-fn getpw(){
+fn getpw() -> String {
     /* Read password from ~/.rlock_pwd file */
 
-    /* Introduce functionality to create file in case it was not created */
+    let file: File;
+    match File::open("~/.rlock_pwd") {
+        Ok(f) => { 
+            file = f;
+        },
+        /* Create file in case it does not exist */
+        Err(_) => {
+            println!("No existing password file! Creating file ... ");
+            createpwfile();
+        }
+    };
+
+    "Hello".to_string()
 }
 
 fn main() {
     let rr: Xrandr;
-    let pwd: *mut passwd;
     let grp: *mut group;
     let duid: uid_t;
     let dgid: gid_t;
-    let hash: *mut c_char;
+    let hash: String;
     let dpy: Display;
     let (s, nlocks, nscreens): (u32, u32, u32);
 
     /* Omitting code from original slock which parses arguments to give version info */
 
-    hash = gethash();
-    unsafe {
-        let printable_string = CStr::from_ptr(hash).to_string_lossy().into_owned();
-        println!("{}", printable_string);
-    }
+    hash = getpw();
 }
