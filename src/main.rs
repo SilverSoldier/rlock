@@ -15,6 +15,8 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::io;
 
+use std::collections::HashMap;
+
 use crypto::digest::Digest;
 use crypto::md5::Md5;
 
@@ -73,13 +75,23 @@ impl Lock {
 #[derive(Copy, Clone)]
 struct Xrandr {
     active: i32,
-    evbase: *mut i32,
-    errbase: *mut i32,
+    evbase: i32,
+    errbase: i32,
 }
 
 impl Xrandr {
-    pub fn new() -> Xrandr {
-        Xrandr { active: 0, evbase: ptr::null_mut(), errbase: ptr::null_mut() }
+    fn new() -> Xrandr {
+        Xrandr { active: 0, evbase: 0, errbase: 0 }
+    }
+}
+
+trait Constructor {
+    fn new() -> Self;
+}
+
+impl Constructor for XColor {
+    fn new() -> XColor {
+        XColor { pixel: 0, red: 0, green: 0, blue: 0, flags: 0, pad: 0 }
     }
 }
 
@@ -92,11 +104,8 @@ fn readinput() -> String {
 }
 
 fn getpwfilepath() -> String {
-    let username: String;
-    unsafe{
-        let name = libc::getenv(CString::new("USER").unwrap().as_ptr());
-        username= CStr::from_ptr(name).to_string_lossy().into_owned();
-    }
+
+    let username = config::getusername();
 
     let file_prefix = String::from("/home/");
     let file_suffix = String::from("/.rlock_pwd");
@@ -180,25 +189,42 @@ fn getpw() -> String {
     }
 }
 
+pub fn getvalue(key: u32, map: HashMap<u32, String>) -> String {
+
+    match map.get(&key) {
+        Some(value) => value.to_string(),
+        None => "".to_string(),
+    }
+}
+
+
 fn lockscreen(dpy: *mut Display, rr: Xrandr, screen: i32) -> (Lock, bool) {
+    println!("Entered lockscreen fn");
     if dpy.is_null() || screen < 0 {
         return (Lock::new(), false);
     } 
 
-    let screen_def_return: *mut XColor = ptr::null_mut();
-    let exact_def_return: *mut XColor = ptr::null_mut();
+    let mut screen_def_return = XColor::new();
+    let mut exact_def_return = XColor::new();
 
-    let mut lock: Lock;
+    let mut lock = Lock::new();
     lock.screen = screen;
+
+    let colors = config::readconfig();
+
+    // println!("{:?}", getvalue(0, colors.clone()).as_ptr());
+
     unsafe {
         lock.root = XRootWindow(dpy, screen);
         for i in 0..Color::NUMCOLS as u32 {
             XAllocNamedColor(
                 dpy,
                 XDefaultColormap(dpy, screen),
-                config::getcolors(i).as_ptr() as *const i8,
-                screen_def_return,
-                exact_def_return);
+                getvalue(i, colors.clone()).as_ptr() as *const i8,
+                &mut screen_def_return,
+                &mut exact_def_return);
+            println!("Reached checkpoint 5");
+            lock.colors.push(screen_def_return.pixel);
         }
     }
     return (Lock::new(), false);
@@ -220,10 +246,11 @@ fn main() {
     unsafe {
         dpy = XOpenDisplay(ptr::null());
 
+        println!("Reached checkpoint 3");
         /* XRRQueryExtension returns event and error base codes */
-        let evbase: *mut i32 = ptr::null_mut();
-        let errbase: *mut i32  = ptr::null_mut();
-        rr.active = XRRQueryExtension(dpy, evbase, errbase);
+        let mut evbase: i32 = 0;
+        let mut errbase: i32 = 0;
+        rr.active = XRRQueryExtension(dpy, &mut evbase, &mut errbase);
         rr.evbase = evbase;
         rr.errbase = errbase;
 
@@ -233,7 +260,9 @@ fn main() {
         let mut nlocks = 0;
 
         for s in 0..nscreens {
+
             let (lock, success) = lockscreen(dpy, rr, s);
+            println!("Reached checkpoint 4");
             if success {
                 locks.push(lock);
                 nlocks += 1;
