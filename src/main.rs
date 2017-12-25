@@ -5,6 +5,13 @@ extern crate libc;
 extern crate crypto;
 
 mod config;
+use structs::{
+    Lock,
+    Xrandr,
+    Constructor,
+};
+
+mod structs;
 
 use std::ptr;
 // use std::process::exit;
@@ -20,18 +27,7 @@ use std::collections::HashMap;
 use crypto::digest::Digest;
 use crypto::md5::Md5;
 
-use x11::xlib::{
-    Window,
-    Pixmap,
-    Display,
-    XOpenDisplay,
-    XScreenCount,
-    XSync,
-    XAllocNamedColor,
-    XDefaultColormap,
-    XRootWindow,
-    XColor,
-};
+use x11::xlib::*;
 
 use x11::xrandr::{
     XRRQueryExtension,
@@ -50,49 +46,6 @@ enum Color {
     INPUT,
     FAILED,
     NUMCOLS
-}
-
-struct Lock {
-    screen: i32,
-    root: Window,
-    win: Window,
-    pmap: Pixmap,
-    colors: Vec<u64>,
-}
-
-impl Lock {
-    pub fn new() -> Lock {
-        Lock { 
-            screen: 0,
-            root: 0,
-            win: 0,
-            pmap: 0,
-            colors: Vec::new()
-        }
-    }
-}
-
-#[derive(Copy, Clone)]
-struct Xrandr {
-    active: i32,
-    evbase: i32,
-    errbase: i32,
-}
-
-impl Xrandr {
-    fn new() -> Xrandr {
-        Xrandr { active: 0, evbase: 0, errbase: 0 }
-    }
-}
-
-trait Constructor {
-    fn new() -> Self;
-}
-
-impl Constructor for XColor {
-    fn new() -> XColor {
-        XColor { pixel: 0, red: 0, green: 0, blue: 0, flags: 0, pad: 0 }
-    }
 }
 
 fn readinput() -> String {
@@ -226,7 +179,26 @@ fn lockscreen(dpy: *mut Display, rr: Xrandr, screen: i32) -> (Lock, bool) {
             println!("Reached checkpoint 5");
             lock.colors.push(screen_def_return.pixel);
         }
+        /* init */
+
+        let mut wa = XSetWindowAttributes::new();
+        wa.override_redirect = 1;
+        wa.background_pixel = lock.colors[0 /* init */];
+        lock.win = XCreateWindow(
+            dpy, /* Display */
+            lock.root, /* Parent window */
+            0, /* x */
+            0, /* y */
+            XDisplayWidth(dpy, lock.screen) as u32, /* width */
+            XDisplayHeight(dpy, lock.screen) as u32, /* height */
+            0, /* border_width */
+            XDefaultDepth(dpy, lock.screen), /* depth */
+            CopyFromParent as u32, /* Class */
+            XDefaultVisual(dpy, lock.screen), /* Visual */
+            CWOverrideRedirect | CWBackPixel, /* ValueMask */
+            &mut wa /* XSetWindowAttributes */);
     }
+
     return (Lock::new(), false);
 }
 
