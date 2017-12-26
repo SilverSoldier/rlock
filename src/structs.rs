@@ -1,7 +1,6 @@
 /* To implement the trait new for all the required structs */
 
 use x11::xlib::*;
-use x11::xrandr::*;
 
 pub trait Constructor {
     fn new() -> Self;

@@ -15,7 +15,6 @@ mod structs;
 
 use std::ptr;
 // use std::process::exit;
-use std::ffi::{ CStr, CString };
 use std::error::Error;
 
 use std::fs::File;
@@ -31,6 +30,8 @@ use x11::xlib::*;
 
 use x11::xrandr::{
     XRRQueryExtension,
+    XRRSelectInput,
+    RRScreenChangeNotifyMask,
 };
 
 use libc::{
@@ -39,6 +40,7 @@ use libc::{
     group,
     uid_t,
     gid_t,
+    usleep,
 };
 
 enum Color {
@@ -159,6 +161,8 @@ fn lockscreen(dpy: *mut Display, rr: Xrandr, screen: i32) -> (Lock, bool) {
 
     let mut screen_def_return = XColor::new();
     let mut exact_def_return = XColor::new();
+    let mut ptgrab = -1;
+    let mut kbgrab = -1;
 
     let mut lock = Lock::new();
     lock.screen = screen;
@@ -197,9 +201,72 @@ fn lockscreen(dpy: *mut Display, rr: Xrandr, screen: i32) -> (Lock, bool) {
             XDefaultVisual(dpy, lock.screen), /* Visual */
             CWOverrideRedirect | CWBackPixel, /* ValueMask */
             &mut wa /* XSetWindowAttributes */);
+
+        let curs = vec![0; 8]; 
+
+        lock.pmap = XCreateBitmapFromData(dpy, lock.win, curs.as_ptr(), 8, 8);
+
+        let invisible = XCreatePixmapCursor(dpy, lock.pmap, lock.pmap, &mut screen_def_return, &mut screen_def_return, 0, 0);
+
+        XDefineCursor(dpy, lock.win, invisible);
+
+        /* Try to grab mouse and keyboard for 600ms */
+
+        for i in 0..6 {
+            if ptgrab != GrabSuccess {
+                ptgrab = XGrabPointer(
+                    dpy,
+                    lock.root,
+                    0,
+                    ButtonPressMask as u32,
+                    GrabModeAsync,
+                    GrabModeAsync,
+                    0,
+                    invisible,
+                    CurrentTime)
+            }
+
+            if kbgrab != GrabSuccess {
+                kbgrab = XGrabKeyboard(
+                    dpy,
+                    lock.root,
+                    1,
+                    GrabModeAsync,
+                    GrabModeAsync,
+                    CurrentTime)
+            }
+
+            /* Input is grabbed, we can lock the screen */
+            if ptgrab == GrabSuccess && kbgrab == GrabSuccess {
+                XMapRaised(dpy, lock.win);
+                if rr.active != 0 {
+                    XRRSelectInput(dpy, lock.win, RRScreenChangeNotifyMask);
+                }
+
+                XSelectInput(dpy, lock.root, SubstructureNotifyMask);
+                return (lock, true);
+            }
+
+            /* Retry on AlreadyGrabbed, fail on other errors */
+            if (ptgrab != AlreadyGrabbed && ptgrab != GrabSuccess) ||
+                (kbgrab != AlreadyGrabbed && kbgrab != GrabSuccess) {
+                break;
+            }
+
+            usleep(100000);
+        }
     }
 
-    return (Lock::new(), false);
+    /* couldn't grab all input: fail out */
+    if ptgrab != GrabSuccess {
+        println!("slock: unable to grab mouse pointer for screen: {}", screen);
+    }
+
+    if kbgrab != GrabSuccess {
+        println!("slock: unable to grab keyboard for screen: {}", screen);
+    }
+
+    (Lock::new(), false)
 }
 
 fn main() {
@@ -245,6 +312,7 @@ fn main() {
         }
 
         XSync(dpy, 0);
+        println!("Reached checkpoint 6");
 
         /* Check if all screens were locked */
         if nlocks != nscreens {
