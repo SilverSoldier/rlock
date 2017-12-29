@@ -5,13 +5,19 @@ extern crate libc;
 extern crate crypto;
 
 mod config;
+
 use structs::{
     Lock,
     Xrandr,
     Constructor,
 };
-
 mod structs;
+
+use keys::{
+    Key,
+    get_key_type,
+};
+mod keys;
 
 use std::ptr;
 // use std::process::exit;
@@ -23,24 +29,26 @@ use std::io;
 
 use std::collections::HashMap;
 
+use std::ffi::{ CStr, CString };
+
 use crypto::digest::Digest;
 use crypto::md5::Md5;
 
 use x11::xlib::*;
-
-use x11::xrandr::{
-    XRRQueryExtension,
-    XRRSelectInput,
-    RRScreenChangeNotifyMask,
-};
+use x11::xrandr::*;
+use x11::keysym::*;
 
 use libc::{
     // strerror,
-    // c_char,
+    c_char,
     group,
     uid_t,
     gid_t,
     usleep,
+    iscntrl,
+    memset,
+    memcpy,
+    c_void,
 };
 
 enum Color {
@@ -152,7 +160,6 @@ pub fn getvalue(key: u32, map: HashMap<u32, String>) -> String {
     }
 }
 
-
 fn lockscreen(dpy: *mut Display, rr: Xrandr, screen: i32) -> (Lock, bool) {
     println!("Entered lockscreen fn");
     if dpy.is_null() || screen < 0 {
@@ -182,6 +189,7 @@ fn lockscreen(dpy: *mut Display, rr: Xrandr, screen: i32) -> (Lock, bool) {
                 &mut exact_def_return);
             println!("Reached checkpoint 5");
             lock.colors.push(screen_def_return.pixel);
+            println!("{:?}", lock);
         }
         /* init */
 
@@ -214,6 +222,7 @@ fn lockscreen(dpy: *mut Display, rr: Xrandr, screen: i32) -> (Lock, bool) {
 
         for i in 0..6 {
             if ptgrab != GrabSuccess {
+
                 ptgrab = XGrabPointer(
                     dpy,
                     lock.root,
@@ -224,9 +233,11 @@ fn lockscreen(dpy: *mut Display, rr: Xrandr, screen: i32) -> (Lock, bool) {
                     0,
                     invisible,
                     CurrentTime)
+                
             }
 
             if kbgrab != GrabSuccess {
+
                 kbgrab = XGrabKeyboard(
                     dpy,
                     lock.root,
@@ -234,18 +245,21 @@ fn lockscreen(dpy: *mut Display, rr: Xrandr, screen: i32) -> (Lock, bool) {
                     GrabModeAsync,
                     GrabModeAsync,
                     CurrentTime)
+
             }
 
             /* Input is grabbed, we can lock the screen */
-            if ptgrab == GrabSuccess && kbgrab == GrabSuccess {
-                XMapRaised(dpy, lock.win);
+
+            // if ptgrab == GrabSuccess && kbgrab == GrabSuccess {
+            
+                // XMapRaised(dpy, lock.win);
                 if rr.active != 0 {
                     XRRSelectInput(dpy, lock.win, RRScreenChangeNotifyMask);
                 }
 
                 XSelectInput(dpy, lock.root, SubstructureNotifyMask);
                 return (lock, true);
-            }
+            // }
 
             /* Retry on AlreadyGrabbed, fail on other errors */
             if (ptgrab != AlreadyGrabbed && ptgrab != GrabSuccess) ||
@@ -267,6 +281,75 @@ fn lockscreen(dpy: *mut Display, rr: Xrandr, screen: i32) -> (Lock, bool) {
     }
 
     (Lock::new(), false)
+}
+
+fn readpw(dpy: *mut Display, rr: Xrandr, locks: Vec<Lock>, nscreens: i32, hash: String) {
+    let mut rre: XRRScreenChangeNotifyEvent;
+    let mut running = 1;
+    let mut ev = XEvent::new();
+    let mut num: i32 ; /* Number of characters entered currently */
+    let mut len: i32 = 0; /* Length of password till now */
+    let mut passwd = Vec::new();
+
+    unsafe {
+        // memset(passwd as *mut c_void, 0, 256);
+
+        while (running != 0) && (XNextEvent(dpy, &mut ev) == 0) {
+
+            let mut buf: CString = CString::new("").unwrap();
+            let mut ksym: KeySym = 0;
+
+            if ev.get_type() == KeyPress {
+                let buf_raw = buf.into_raw();
+                num = XLookupString(&mut ev.key, buf_raw, 32, &mut ksym, ptr::null_mut() as *mut XComposeStatus);
+                let buf = CString::from_raw(buf_raw);
+                println!("Key pressed: buf: {:?}, num: {:?}, ksym: {}", buf, num, ksym);
+                let key_type = get_key_type(ksym);
+
+                /* If key typed is one of the extras ignore it */
+                let exclude = vec![Key::FUNCTION, Key::KEYPAD, Key::MISCFUNCTION, Key::PF, Key::PRIVATEKEYPAD];
+                match exclude.into_iter().find(|x| x.clone() == Key::from(ksym)) {
+                    Some(_) => continue,
+                    None => {},
+                }
+
+                println!("Key pressed: buf: {:?}, num: {:?}, ksym: {}", buf, num, ksym);
+
+                match ksym as u32 {
+                    XK_Return => {
+                        /* User has finished typing the password */
+                        /* Hash password, compare with hash */
+
+                        let passwd_string = String::from_utf8(passwd).unwrap();
+
+                        panic!("Exited {}", passwd_string);
+
+                        /* If wrong, set as failed */
+                    },
+                    XK_Escape => {
+                        /* Clear password typed until now */
+                        // passwd = vec![0; 256];
+                        len = 0;
+                    },
+                    XK_BackSpace => {
+                        /* Remove last entry */
+                        len -= 1;
+                    },
+                    _ => {
+                        // if num != 0 && iscntrl(CString::from_raw(buf).into_bytes()[0] as i32) == 0 {
+                        if num != 0 {
+                            let buf_slice = buf.to_bytes();
+                            passwd.extend_from_slice(buf_slice);
+                            println!("Password {:?}", passwd);
+                            len = len + num;
+                            // libc::memcpy(passwd, buf, num as usize);
+                        }
+                    }
+
+                }
+            }
+        }
+    }
 }
 
 fn main() {
@@ -318,5 +401,13 @@ fn main() {
         if nlocks != nscreens {
             panic!("Could not lock all screens");
         }
+
+        /* run post-lock command */
+        /* TODO: understand why slock code has fork */
+
+        readpw(dpy, rr, locks, nscreens, hash);
+
+        println!("Exited readpw");
+
     }
 }
