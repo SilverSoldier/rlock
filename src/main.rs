@@ -20,7 +20,7 @@ use keys::{
 mod keys;
 
 use std::ptr;
-// use std::process::exit;
+
 use std::error::Error;
 
 use std::fs::File;
@@ -29,7 +29,7 @@ use std::io;
 
 use std::collections::HashMap;
 
-use std::ffi::{ CStr, CString };
+use std::ffi::CString;
 
 use std::cmp::Ordering;
 
@@ -41,16 +41,10 @@ use x11::xrandr::*;
 use x11::keysym::*;
 
 use libc::{
-    // strerror,
-    c_char,
     group,
     uid_t,
     gid_t,
     usleep,
-    iscntrl,
-    memset,
-    memcpy,
-    c_void,
 };
 
 enum Color {
@@ -303,14 +297,13 @@ fn readpw(dpy: *mut Display, rr: Xrandr, locks: Vec<Lock>, nscreens: i32, actual
     unsafe {
         while running && (XNextEvent(dpy, &mut ev) == 0) {
 
-            let mut buf: CString = CString::new("").unwrap();
             let mut ksym: KeySym = 0;
 
             if ev.get_type() == KeyPress {
 
                 println!("Password {:?}", passwd);
 
-                let buf_raw = buf.into_raw();
+                let buf_raw = CString::new("").unwrap().into_raw();
                 num = XLookupString(&mut ev.key, buf_raw, 32, &mut ksym, ptr::null_mut() as *mut XComposeStatus);
                 let buf = CString::from_raw(buf_raw);
                 println!("Key pressed: buf: {:?}, num: {:?}, ksym: {}", buf, num, ksym);
@@ -328,11 +321,12 @@ fn readpw(dpy: *mut Display, rr: Xrandr, locks: Vec<Lock>, nscreens: i32, actual
                 match ksym as u32 {
                     XK_Return => {
                         /* User has finished typing the password */
-                        /* Hash password, compare with hash from file */
-
                         let passwd_string = String::from_utf8(passwd).unwrap();
 
+                        /* Hash password */
                         let input_hash = hash(&passwd_string);
+
+                        /* Compare with actual hash (read from file) */
                         match input_hash.cmp(&actual_hash) {
                             Ordering::Equal => running = false,
                             _ => {
@@ -349,15 +343,14 @@ fn readpw(dpy: *mut Display, rr: Xrandr, locks: Vec<Lock>, nscreens: i32, actual
                         passwd = Vec::new();
                     },
                     XK_BackSpace => {
-                        /* Remove last entry */
+                        /* Remove last entered character */
                         passwd.pop();
                     },
                     _ => {
-                        // if num != 0 && iscntrl(CString::from_raw(buf).into_bytes()[0] as i32) == 0 {
+                        /* All other characters can be counted as a password character */
                         if num != 0 {
                             let buf_slice = buf.to_bytes();
                             passwd.extend_from_slice(buf_slice);
-                            // libc::memcpy(passwd, buf, num as usize);
                         }
                     }
 
