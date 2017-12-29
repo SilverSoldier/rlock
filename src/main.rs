@@ -297,13 +297,10 @@ fn readpw(dpy: *mut Display, rr: Xrandr, locks: Vec<Lock>, nscreens: i32, actual
     let mut running = true;
     let mut ev = XEvent::new();
     let mut num: i32 ; /* Number of characters entered currently */
-    let mut len: i32 = 0; /* Length of password till now */
     let mut passwd = Vec::new();
     let mut failure = false;
 
     unsafe {
-        // memset(passwd as *mut c_void, 0, 256);
-
         while running && (XNextEvent(dpy, &mut ev) == 0) {
 
             let mut buf: CString = CString::new("").unwrap();
@@ -345,25 +342,21 @@ fn readpw(dpy: *mut Display, rr: Xrandr, locks: Vec<Lock>, nscreens: i32, actual
                             }
                         }
                         passwd = Vec::new();
-                        len = 0;
                         break;
                     },
                     XK_Escape => {
                         /* Clear password typed until now */
                         passwd = Vec::new();
-                        len = 0;
                     },
                     XK_BackSpace => {
                         /* Remove last entry */
                         passwd.pop();
-                        len -= 1;
                     },
                     _ => {
                         // if num != 0 && iscntrl(CString::from_raw(buf).into_bytes()[0] as i32) == 0 {
                         if num != 0 {
                             let buf_slice = buf.to_bytes();
                             passwd.extend_from_slice(buf_slice);
-                            len = len + num;
                             // libc::memcpy(passwd, buf, num as usize);
                         }
                     }
