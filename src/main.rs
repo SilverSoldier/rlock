@@ -31,6 +31,8 @@ use std::collections::HashMap;
 
 use std::ffi::{ CStr, CString };
 
+use std::cmp::Ordering;
+
 use crypto::digest::Digest;
 use crypto::md5::Md5;
 
@@ -77,6 +79,17 @@ fn getpwfilepath() -> String {
     path
 }
 
+/** Function to hash password that the user entered .
+ * to_hash: reference to string which needs to be hashed.
+ * returns: hashed string using Md5 algortithm
+ * */
+
+fn hash(to_hash: &String) -> String {
+    let mut digest = Md5::new();
+    digest.input_str(&to_hash);
+    digest.result_str()
+}
+
 fn createpwfile() -> String {
     /* Prompt user for password */
     print!("Enter password for screen lock: ");
@@ -98,11 +111,7 @@ fn createpwfile() -> String {
         createpwfile();
     }
 
-    /* Hash password that the user entered */
-    let mut digest = Md5::new();
-    digest.input_str(&pwd);
-    let hash = digest.result_str();
-    print!("Hash: {}", hash);
+    let pwd_hash = hash(&pwd);
 
     /* Write to the pwd file */
     let path = getpwfilepath();
@@ -110,10 +119,10 @@ fn createpwfile() -> String {
     match File::create(path.clone()) {
         Ok(f) => {
             let mut file = f;
-            match file.write_all(hash.as_bytes()){
+            match file.write_all(pwd_hash.as_bytes()){
                 Ok(_) => {
                     println!("Successfully wrote to {}", path);
-                    hash
+                    pwd_hash
                 },
                 Err(msg) => {
                     panic!("Error writing to file: {}",  msg);
@@ -283,23 +292,27 @@ fn lockscreen(dpy: *mut Display, rr: Xrandr, screen: i32) -> (Lock, bool) {
     (Lock::new(), false)
 }
 
-fn readpw(dpy: *mut Display, rr: Xrandr, locks: Vec<Lock>, nscreens: i32, hash: String) {
+fn readpw(dpy: *mut Display, rr: Xrandr, locks: Vec<Lock>, nscreens: i32, actual_hash: String) {
     let mut rre: XRRScreenChangeNotifyEvent;
-    let mut running = 1;
+    let mut running = true;
     let mut ev = XEvent::new();
     let mut num: i32 ; /* Number of characters entered currently */
     let mut len: i32 = 0; /* Length of password till now */
     let mut passwd = Vec::new();
+    let mut failure = false;
 
     unsafe {
         // memset(passwd as *mut c_void, 0, 256);
 
-        while (running != 0) && (XNextEvent(dpy, &mut ev) == 0) {
+        while running && (XNextEvent(dpy, &mut ev) == 0) {
 
             let mut buf: CString = CString::new("").unwrap();
             let mut ksym: KeySym = 0;
 
             if ev.get_type() == KeyPress {
+
+                println!("Password {:?}", passwd);
+
                 let buf_raw = buf.into_raw();
                 num = XLookupString(&mut ev.key, buf_raw, 32, &mut ksym, ptr::null_mut() as *mut XComposeStatus);
                 let buf = CString::from_raw(buf_raw);
@@ -318,21 +331,31 @@ fn readpw(dpy: *mut Display, rr: Xrandr, locks: Vec<Lock>, nscreens: i32, hash: 
                 match ksym as u32 {
                     XK_Return => {
                         /* User has finished typing the password */
-                        /* Hash password, compare with hash */
+                        /* Hash password, compare with hash from file */
 
                         let passwd_string = String::from_utf8(passwd).unwrap();
 
-                        panic!("Exited {}", passwd_string);
-
-                        /* If wrong, set as failed */
+                        let input_hash = hash(&passwd_string);
+                        match input_hash.cmp(&actual_hash) {
+                            Ordering::Equal => running = false,
+                            _ => {
+                                /* If wrong, set as failed */
+                                XBell(dpy, 100);
+                                failure = true;
+                            }
+                        }
+                        passwd = Vec::new();
+                        len = 0;
+                        break;
                     },
                     XK_Escape => {
                         /* Clear password typed until now */
-                        // passwd = vec![0; 256];
+                        passwd = Vec::new();
                         len = 0;
                     },
                     XK_BackSpace => {
                         /* Remove last entry */
+                        passwd.pop();
                         len -= 1;
                     },
                     _ => {
@@ -340,7 +363,6 @@ fn readpw(dpy: *mut Display, rr: Xrandr, locks: Vec<Lock>, nscreens: i32, hash: 
                         if num != 0 {
                             let buf_slice = buf.to_bytes();
                             passwd.extend_from_slice(buf_slice);
-                            println!("Password {:?}", passwd);
                             len = len + num;
                             // libc::memcpy(passwd, buf, num as usize);
                         }

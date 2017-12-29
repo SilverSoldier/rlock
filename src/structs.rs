@@ -6,6 +6,7 @@ pub trait Constructor {
     fn new() -> Self;
 }
 
+#[derive(Debug)]
 pub struct Lock {
     pub screen: i32,
     pub root: Window,
@@ -66,3 +67,10 @@ impl Constructor for XSetWindowAttributes {
         }
     }
 }
+
+impl Constructor for XEvent {
+    fn new() -> XEvent {
+        XEvent { pad: [0; 24] }
+    }
+}
+
