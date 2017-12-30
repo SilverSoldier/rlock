@@ -171,8 +171,7 @@ pub fn getvalue(key: u32, map: HashMap<u32, String>) -> String {
     }
 }
 
-fn lockscreen(dpy: *mut Display, rr: Xrandr, screen: i32) -> (Lock, bool) {
-    println!("Entered lockscreen fn");
+fn lockscreen(dpy: *mut Display, rr: Xrandr, screen: i32, colors: HashMap<u32, String>) -> (Lock, bool) {
     if dpy.is_null() || screen < 0 {
         return (Lock::new(), false);
     } 
@@ -185,7 +184,6 @@ fn lockscreen(dpy: *mut Display, rr: Xrandr, screen: i32) -> (Lock, bool) {
     let mut lock = Lock::new();
     lock.screen = screen;
 
-    let colors = config::readconfig();
 
     // println!("{:?}", getvalue(0, colors.clone()).as_ptr());
 
@@ -198,9 +196,8 @@ fn lockscreen(dpy: *mut Display, rr: Xrandr, screen: i32) -> (Lock, bool) {
                 getvalue(i, colors.clone()).as_ptr() as *const i8,
                 &mut screen_def_return,
                 &mut exact_def_return);
-            println!("Reached checkpoint 5");
             lock.colors.push(screen_def_return.pixel);
-            println!("{:?}", lock);
+            println!("{:?}", screen_def_return);
         }
         /* init */
 
@@ -261,16 +258,16 @@ fn lockscreen(dpy: *mut Display, rr: Xrandr, screen: i32) -> (Lock, bool) {
 
             /* Input is grabbed, we can lock the screen */
 
-            // if ptgrab == GrabSuccess && kbgrab == GrabSuccess {
+            if ptgrab == GrabSuccess && kbgrab == GrabSuccess {
             
-                // XMapRaised(dpy, lock.win);
+                XMapRaised(dpy, lock.win);
                 if rr.active != 0 {
                     XRRSelectInput(dpy, lock.win, RRScreenChangeNotifyMask);
                 }
 
                 XSelectInput(dpy, lock.root, SubstructureNotifyMask);
                 return (lock, true);
-            // }
+            }
 
             /* Retry on AlreadyGrabbed, fail on other errors */
             if (ptgrab != AlreadyGrabbed && ptgrab != GrabSuccess) ||
@@ -294,13 +291,13 @@ fn lockscreen(dpy: *mut Display, rr: Xrandr, screen: i32) -> (Lock, bool) {
     (Lock::new(), false)
 }
 
-fn readpw(dpy: *mut Display, rr: Xrandr, locks: Vec<Lock>, nscreens: i32, actual_hash: String) {
-    let mut rre: XRRScreenChangeNotifyEvent;
+fn readpw(dpy: *mut Display, rr: Xrandr, locks: Vec<Lock>, nscreens: usize, actual_hash: String, colors: HashMap<u32, String>) {
     let mut running = true;
     let mut ev = XEvent::new();
     let mut num: i32 ; /* Number of characters entered currently */
     let mut passwd = Vec::new();
     let mut failure = false;
+    let mut old_color = Color::INIT;
 
     unsafe {
         while running && (XNextEvent(dpy, &mut ev) == 0) {
@@ -309,22 +306,16 @@ fn readpw(dpy: *mut Display, rr: Xrandr, locks: Vec<Lock>, nscreens: i32, actual
 
             if ev.get_type() == KeyPress {
 
-                println!("Password {:?}", passwd);
-
                 let buf_raw = CString::new("").unwrap().into_raw();
                 num = XLookupString(&mut ev.key, buf_raw, 32, &mut ksym, ptr::null_mut() as *mut XComposeStatus);
                 let buf = CString::from_raw(buf_raw);
-                println!("Key pressed: buf: {:?}, num: {:?}, ksym: {}", buf, num, ksym);
                 let key_type = get_key_type(ksym);
 
                 /* If key typed is one of the extras ignore it */
-                let exclude = vec![Key::FUNCTION, Key::KEYPAD, Key::MISCFUNCTION, Key::PF, Key::PRIVATEKEYPAD];
-                match exclude.into_iter().find(|x| x.clone() == Key::from(ksym)) {
-                    Some(_) => continue,
-                    None => {},
-                }
-
-                println!("Key pressed: buf: {:?}, num: {:?}, ksym: {}", buf, num, ksym);
+                match key_type {
+                    Ok(_) => continue,
+                    Err(_) => {}
+                };
 
                 match ksym as u32 {
                     XK_Return => {
@@ -334,6 +325,9 @@ fn readpw(dpy: *mut Display, rr: Xrandr, locks: Vec<Lock>, nscreens: i32, actual
                         /* Hash password */
                         let input_hash = hash(&passwd_string);
 
+                        // println!("{}", input_hash);
+                        // println!("{}", actual_hash);
+
                         /* Compare with actual hash (read from file) */
                         match input_hash.cmp(&actual_hash) {
                             Ordering::Equal => running = false,
@@ -342,9 +336,9 @@ fn readpw(dpy: *mut Display, rr: Xrandr, locks: Vec<Lock>, nscreens: i32, actual
                                 XBell(dpy, 100);
                                 failure = true;
                             }
-                        }
-                        passwd = Vec::new();
-                        break;
+                        };
+                        passwd = Vec::new(); 
+                        // panic!("exiting");
                     },
                     XK_Escape => {
                         /* Clear password typed until now */
@@ -361,7 +355,41 @@ fn readpw(dpy: *mut Display, rr: Xrandr, locks: Vec<Lock>, nscreens: i32, actual
                             passwd.extend_from_slice(buf_slice);
                         }
                     }
-
+                }
+                let color = match failure {
+                    true => Color::FAILED,
+                    _ => {
+                        match passwd.is_empty(){
+                            true => Color::INIT,
+                            false => Color::INPUT
+                        }
+                    }
+                };
+                if running && (old_color as u32 != color as u32) {
+                    for lock in locks.iter() {
+                        XSetWindowBackground(dpy, lock.win, *lock.colors.get(color as usize).unwrap());
+                        // XSetWindowBackground(dpy, lock.win, lock.colors[color]);
+                        XClearWindow(dpy, lock.win);
+                    }
+                    old_color = color;
+                }
+                else if (rr.active != 0) && (ev.get_type() == rr.evbase + RRScreenChangeNotify) {
+                    let rre = XRRScreenChangeNotifyEvent::from(ev);
+                    for lock in locks.iter() {
+                        if lock.win == rre.window {
+                            match rre.rotation as i32{
+                                RR_Rotate_90 | RR_Rotate_270 => XResizeWindow(dpy, lock.win, rre.height as u32, rre.width as u32),
+                                _ => XResizeWindow(dpy, lock.win, rre.width as u32, rre.height as u32)
+                            };
+                            XClearWindow(dpy, lock.win);
+                            break;
+                        }
+                    }
+                }
+                else {
+                    for lock in locks.iter() {
+                        XRaiseWindow(dpy, lock.win);
+                    }
                 }
             }
         }
@@ -396,22 +424,22 @@ fn main() {
         nscreens = XScreenCount(dpy);
         let mut locks: Vec<Lock> = Vec::new();
         let mut nlocks = 0;
+        let colors = config::readconfig();
 
         for s in 0..nscreens {
 
-            let (lock, success) = lockscreen(dpy, rr, s);
+            let (lock, success) = lockscreen(dpy, rr, s, colors.clone());
             println!("Reached checkpoint 4");
-            if success {
-                locks.push(lock);
-                nlocks += 1;
-            }
-            else {
-                break;
-            }
+            match success {
+                true => {
+                    locks.push(lock);
+                    nlocks += 1;
+                },
+                false => break
+            };
         }
 
         XSync(dpy, 0);
-        println!("Reached checkpoint 6");
 
         /* Check if all screens were locked */
         if nlocks != nscreens {
@@ -421,7 +449,7 @@ fn main() {
         /* run post-lock command */
         /* TODO: understand why slock code has fork */
 
-        readpw(dpy, rr, locks, nscreens, hash);
+        readpw(dpy, rr, locks, nscreens as usize, hash, colors);
 
         println!("Exited readpw");
 
