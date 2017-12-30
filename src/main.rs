@@ -47,6 +47,7 @@ use libc::{
     usleep,
 };
 
+#[derive(Copy, Clone, Debug)]
 enum Color {
     INIT,
     INPUT,
@@ -93,7 +94,7 @@ fn createpwfile() -> String {
     let pwd = readinput();
 
     /* Prompt user to re-enter password */
-    print!("Re-enter password to verify: ");
+    println!("Re-enter password to verify: ");
     std::io::stdout().flush().unwrap();
 
     let pwd_verify = readinput();
@@ -105,7 +106,14 @@ fn createpwfile() -> String {
         createpwfile();
     }
 
-    let pwd_hash = hash(&pwd);
+    /* Removing the newline character which was also included */
+    let mut pwd_in_bytes = pwd.into_bytes();
+    pwd_in_bytes.pop();
+
+    let input_pwd = String::from_utf8(pwd_in_bytes).unwrap();
+
+    let pwd_hash = hash(&input_pwd);
+    println!("{}", pwd_hash);
 
     /* Write to the pwd file */
     let path = getpwfilepath();
