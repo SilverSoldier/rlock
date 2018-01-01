@@ -142,11 +142,11 @@ fn create_pwfile() -> String {
     }
 }
 
-fn getpw() -> String {
+fn getpw(force_create_file: bool) -> String {
     /* Read password from /home/USER/.rlock_pwd file */
 
-    match File::open(get_pwfile_path()) {
-        Ok(f) => { 
+    match (File::open(get_pwfile_path()), force_create_file) {
+        (Ok(f), false) => { 
             let mut file = f;
             let mut contents = String::new();
             match file.read_to_string(&mut contents) {
@@ -157,8 +157,8 @@ fn getpw() -> String {
             }
         },
         /* Create file in case it does not exist */
-        Err(_) => {
-            println!("No existing password file! Creating file ... ");
+        (Err(_), _) | (_, true) => {
+            println!("Creating password file ... ");
             create_pwfile()
         }
     }
@@ -407,9 +407,9 @@ fn main() {
                         .and_then(|d| d.parse())
                         .unwrap_or_else(|e| e.exit());
 
-    println!("{:?}", args);
+    // println!("{:?}", args.get_bool("-p"));
 
-    hash = getpw();
+    hash = getpw(args.get_bool("-p"));
 
     unsafe {
         dpy = XOpenDisplay(ptr::null());
