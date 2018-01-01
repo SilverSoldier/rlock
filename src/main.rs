@@ -55,7 +55,7 @@ enum Color {
     NUMCOLS
 }
 
-fn readinput() -> String {
+fn read_input() -> String {
     let mut input = String::new();
     match io::stdin().read_line(&mut input) {
         Ok(_) => input,
@@ -63,7 +63,7 @@ fn readinput() -> String {
     }
 }
 
-fn getpwfilepath() -> String {
+fn get_pwfile_path() -> String {
 
     let username = config::getusername();
 
@@ -85,38 +85,36 @@ fn hash(to_hash: &String) -> String {
     digest.result_str()
 }
 
-fn createpwfile() -> String {
+fn create_pwfile() -> String {
     /* Prompt user for password */
     print!("Enter password for screen lock: ");
     std::io::stdout().flush().unwrap();
 
     /* TODO: Input field should not display whatever is entered */
-    let pwd = readinput();
+    let pwd = read_input();
 
     /* Prompt user to re-enter password */
-    println!("Re-enter password to verify: ");
+    print!("Re-enter password to verify: ");
     std::io::stdout().flush().unwrap();
 
-    let pwd_verify = readinput();
+    let pwd_verify = read_input();
 
-    /* Verify both hashes */
-
+    /* Verify both passwords */
     if pwd != pwd_verify {
         println!("Passwords do not match!. Try again.");
-        createpwfile();
+        create_pwfile();
     }
 
-    /* Removing the newline character which was also included */
+    /* Removing the newline character which is also included */
     let mut pwd_in_bytes = pwd.into_bytes();
     pwd_in_bytes.pop();
-
     let input_pwd = String::from_utf8(pwd_in_bytes).unwrap();
 
+    /* Hash password */
     let pwd_hash = hash(&input_pwd);
-    println!("{}", pwd_hash);
 
-    /* Write to the pwd file */
-    let path = getpwfilepath();
+    /* Write to the pw file */
+    let path = get_pwfile_path();
 
     match File::create(path.clone()) {
         Ok(f) => {
@@ -141,15 +139,12 @@ fn createpwfile() -> String {
 fn getpw() -> String {
     /* Read password from /home/USER/.rlock_pwd file */
 
-    match File::open(getpwfilepath()) {
+    match File::open(get_pwfile_path()) {
         Ok(f) => { 
             let mut file = f;
             let mut contents = String::new();
             match file.read_to_string(&mut contents) {
-                Ok(_) => {
-                    println!("{}", contents);
-                    contents
-                },
+                Ok(_) => contents,
                 Err(msg) => {
                     panic!("Cannot read contents of file. {}", msg);
                 }
@@ -158,7 +153,7 @@ fn getpw() -> String {
         /* Create file in case it does not exist */
         Err(_) => {
             println!("No existing password file! Creating file ... ");
-            createpwfile()
+            create_pwfile()
         }
     }
 }
@@ -291,10 +286,9 @@ fn lockscreen(dpy: *mut Display, rr: Xrandr, screen: i32, colors: HashMap<u32, S
     (Lock::new(), false)
 }
 
-fn readpw(dpy: *mut Display, rr: Xrandr, locks: Vec<Lock>, nscreens: usize, actual_hash: String, colors: HashMap<u32, String>) {
+fn readpw(dpy: *mut Display, rr: Xrandr, locks: Vec<Lock>, actual_hash: String, colors: HashMap<u32, String>) {
     let mut running = true;
     let mut ev = XEvent::new();
-    let mut num: i32 ; /* Number of characters entered currently */
     let mut passwd = Vec::new();
     let mut failure = false;
     let mut old_color = Color::INIT;
@@ -307,12 +301,12 @@ fn readpw(dpy: *mut Display, rr: Xrandr, locks: Vec<Lock>, nscreens: usize, actu
             if ev.get_type() == KeyPress {
 
                 let buf_raw = CString::new("").unwrap().into_raw();
-                num = XLookupString(&mut ev.key, buf_raw, 32, &mut ksym, ptr::null_mut() as *mut XComposeStatus);
+                let num = XLookupString(&mut ev.key, buf_raw, 32, &mut ksym, ptr::null_mut() as *mut XComposeStatus);
                 let buf = CString::from_raw(buf_raw);
-                let key_type = get_key_type(ksym);
+                // let key_type = get_key_type(ksym);
 
                 /* If key typed is one of the extras ignore it */
-                match key_type {
+                match get_key_type(ksym) {
                     Ok(_) => continue,
                     Err(_) => {}
                 };
@@ -325,9 +319,6 @@ fn readpw(dpy: *mut Display, rr: Xrandr, locks: Vec<Lock>, nscreens: usize, actu
                         /* Hash password */
                         let input_hash = hash(&passwd_string);
 
-                        // println!("{}", input_hash);
-                        // println!("{}", actual_hash);
-
                         /* Compare with actual hash (read from file) */
                         match input_hash.cmp(&actual_hash) {
                             Ordering::Equal => running = false,
@@ -338,7 +329,6 @@ fn readpw(dpy: *mut Display, rr: Xrandr, locks: Vec<Lock>, nscreens: usize, actu
                             }
                         };
                         passwd = Vec::new(); 
-                        // panic!("exiting");
                     },
                     XK_Escape => {
                         /* Clear password typed until now */
@@ -449,9 +439,8 @@ fn main() {
         /* run post-lock command */
         /* TODO: understand why slock code has fork */
 
-        readpw(dpy, rr, locks, nscreens as usize, hash, colors);
+        readpw(dpy, rr, locks, hash, colors);
 
         println!("Exited readpw");
-
     }
 }
