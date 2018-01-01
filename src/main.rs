@@ -35,8 +35,6 @@ use std::ffi::CString;
 
 use std::cmp::Ordering;
 
-use std::env::args;
-
 use crypto::digest::Digest;
 use crypto::md5::Md5;
 
@@ -45,9 +43,6 @@ use x11::xrandr::*;
 use x11::keysym::*;
 
 use libc::{
-    group,
-    uid_t,
-    gid_t,
     usleep,
 };
 
@@ -142,8 +137,12 @@ fn create_pwfile() -> String {
     }
 }
 
+/** Function to read password from /home/user/.rlock_pwd if it exists
+ * else prompt user and create file_suffix
+ * force_create_file: bool If true, then prompt user even if file exists
+ */
 fn getpw(force_create_file: bool) -> String {
-    /* Read password from /home/USER/.rlock_pwd file */
+    /* Read password from /home/user/.rlock_pwd file */
 
     match (File::open(get_pwfile_path()), force_create_file) {
         (Ok(f), false) => { 
@@ -172,7 +171,7 @@ pub fn getvalue(key: u32, map: HashMap<u32, String>) -> String {
     }
 }
 
-fn lockscreen(dpy: *mut Display, rr: Xrandr, screen: i32, colors: HashMap<u32, String>) -> (Lock, bool) {
+fn lockscreen(dpy: *mut Display, rr: Xrandr, screen: i32, colors: HashMap<u32, String>, keyboard_only: bool) -> (Lock, bool) {
     if dpy.is_null() || screen < 0 {
         return (Lock::new(), false);
     } 
@@ -185,21 +184,21 @@ fn lockscreen(dpy: *mut Display, rr: Xrandr, screen: i32, colors: HashMap<u32, S
     let mut lock = Lock::new();
     lock.screen = screen;
 
-
     // println!("{:?}", getvalue(0, colors.clone()).as_ptr());
 
     unsafe {
         lock.root = XRootWindow(dpy, screen);
         let default_cmap = XDefaultColormap(dpy, screen);
         for i in 0..Color::NUMCOLS as u32 {
-            XAllocNamedColor(
+            // println!("{:?}", getvalue(i, colors.clone()));
+            let err = XAllocNamedColor(
                 dpy,
                 default_cmap,
                 getvalue(i, colors.clone()).as_ptr() as *const i8,
                 &mut screen_def_return,
                 &mut exact_def_return);
             lock.colors.push(screen_def_return.pixel);
-            println!("{:?}", screen_def_return);
+            // println!("Err: {}, {:?}", err, screen_def_return);
         }
 
         /* init */
@@ -231,7 +230,7 @@ fn lockscreen(dpy: *mut Display, rr: Xrandr, screen: i32, colors: HashMap<u32, S
 
         /* Try to grab mouse and keyboard for 600ms */
 
-        for i in 0..6 {
+        for _ in 0..6 {
             if ptgrab != GrabSuccess {
 
                 ptgrab = XGrabPointer(
@@ -263,7 +262,9 @@ fn lockscreen(dpy: *mut Display, rr: Xrandr, screen: i32, colors: HashMap<u32, S
 
             if ptgrab == GrabSuccess && kbgrab == GrabSuccess {
             
-                XMapRaised(dpy, lock.win);
+                if !keyboard_only {
+                    XMapRaised(dpy, lock.win);
+                }
                 if rr.active != 0 {
                     XRRSelectInput(dpy, lock.win, RRScreenChangeNotifyMask);
                 }
@@ -294,7 +295,7 @@ fn lockscreen(dpy: *mut Display, rr: Xrandr, screen: i32, colors: HashMap<u32, S
     (Lock::new(), false)
 }
 
-fn readpw(dpy: *mut Display, rr: Xrandr, locks: Vec<Lock>, actual_hash: String, colors: HashMap<u32, String>) {
+fn readpw(dpy: *mut Display, rr: Xrandr, locks: Vec<Lock>, actual_hash: String, keyboard_only: bool) {
     let mut running = true;
     let mut ev = XEvent::new();
     let mut passwd = Vec::new();
@@ -354,39 +355,42 @@ fn readpw(dpy: *mut Display, rr: Xrandr, locks: Vec<Lock>, actual_hash: String, 
                         }
                     }
                 }
-                let color = match failure {
-                    true => Color::FAILED,
-                    _ => {
-                        match passwd.is_empty(){
-                            true => Color::INIT,
-                            false => Color::INPUT
+
+                if !keyboard_only {
+                    let color = match passwd.is_empty() {
+                        false => Color::INPUT,
+                        _ => {
+                            match failure {
+                                true => Color::FAILED,
+                                false => Color::INIT
+                            }
                         }
-                    }
-                };
-                if running && (old_color as u32 != color as u32) {
-                    for lock in locks.iter() {
-                        XSetWindowBackground(dpy, lock.win, *lock.colors.get(color as usize).unwrap());
-                        // XSetWindowBackground(dpy, lock.win, lock.colors[color]);
-                        XClearWindow(dpy, lock.win);
-                    }
-                    old_color = color;
-                }
-                else if (rr.active != 0) && (ev.get_type() == rr.evbase + RRScreenChangeNotify) {
-                    let rre = XRRScreenChangeNotifyEvent::from(ev);
-                    for lock in locks.iter() {
-                        if lock.win == rre.window {
-                            match rre.rotation as i32{
-                                RR_Rotate_90 | RR_Rotate_270 => XResizeWindow(dpy, lock.win, rre.height as u32, rre.width as u32),
-                                _ => XResizeWindow(dpy, lock.win, rre.width as u32, rre.height as u32)
-                            };
+                    };
+                    if running && (old_color as u32 != color as u32) {
+                        for lock in locks.iter() {
+                            XSetWindowBackground(dpy, lock.win, *lock.colors.get(color as usize).unwrap());
+                            // XSetWindowBackground(dpy, lock.win, lock.colors[color]);
                             XClearWindow(dpy, lock.win);
-                            break;
+                        }
+                        old_color = color;
+                    }
+                    else if (rr.active != 0) && (ev.get_type() == rr.evbase + RRScreenChangeNotify) {
+                        let rre = XRRScreenChangeNotifyEvent::from(ev);
+                        for lock in locks.iter() {
+                            if lock.win == rre.window {
+                                match rre.rotation as i32{
+                                    RR_Rotate_90 | RR_Rotate_270 => XResizeWindow(dpy, lock.win, rre.height as u32, rre.width as u32),
+                                    _ => XResizeWindow(dpy, lock.win, rre.width as u32, rre.height as u32)
+                                };
+                                XClearWindow(dpy, lock.win);
+                                break;
+                            }
                         }
                     }
-                }
-                else {
-                    for lock in locks.iter() {
-                        XRaiseWindow(dpy, lock.win);
+                    else {
+                        for lock in locks.iter() {
+                            XRaiseWindow(dpy, lock.win);
+                        }
                     }
                 }
             }
@@ -396,7 +400,6 @@ fn readpw(dpy: *mut Display, rr: Xrandr, locks: Vec<Lock>, actual_hash: String, 
 
 fn main() {
     let mut rr = Xrandr::new();
-    let grp: *mut group;
     let hash: String;
     let dpy: *mut Display;
     let nscreens: i32;
@@ -404,39 +407,34 @@ fn main() {
     /* TODO: add command line arguments functionality to change password */
 
     let args = Docopt::new(USAGE)
-                        .and_then(|d| d.parse())
-                        .unwrap_or_else(|e| e.exit());
+        .and_then(|d| d.parse())
+        .unwrap_or_else(|e| e.exit());
 
     // println!("{:?}", args.get_bool("-p"));
 
     hash = getpw(args.get_bool("-p"));
+    let keyboard_only = args.get_bool("-k");
+    if keyboard_only {
+        println!("rlock is running");
+        println!("Enter password to exit");
+    }
 
     unsafe {
         dpy = XOpenDisplay(ptr::null());
 
-        println!("Reached checkpoint 3");
         /* XRRQueryExtension returns event and error base codes */
-        let mut evbase: i32 = 0;
-        let mut errbase: i32 = 0;
-        rr.active = XRRQueryExtension(dpy, &mut evbase, &mut errbase);
-        rr.evbase = evbase;
-        rr.errbase = errbase;
+        rr.active = XRRQueryExtension(dpy, &mut rr.evbase, &mut rr.errbase);
 
         /* Get number of screens from dpy and blank them */
         nscreens = XScreenCount(dpy);
         let mut locks: Vec<Lock> = Vec::new();
-        let mut nlocks = 0;
         let colors = config::readconfig();
 
         for s in 0..nscreens {
 
-            let (lock, success) = lockscreen(dpy, rr, s, colors.clone());
-            println!("Reached checkpoint 4");
+            let (lock, success) = lockscreen(dpy, rr, s, colors.clone(), keyboard_only);
             match success {
-                true => {
-                    locks.push(lock);
-                    nlocks += 1;
-                },
+                true => locks.push(lock),
                 false => break
             };
         }
@@ -444,15 +442,19 @@ fn main() {
         XSync(dpy, 0);
 
         /* Check if all screens were locked */
-        if nlocks != nscreens {
+        if locks.len() as i32 != nscreens {
             panic!("Could not lock all screens");
         }
 
         /* run post-lock command */
         /* TODO: understand why slock code has fork */
 
-        readpw(dpy, rr, locks, hash, colors);
+        readpw(dpy, rr, locks, hash, keyboard_only);
 
-        println!("Exited readpw");
-    }
+        /* run post-lock command */
+        /* TODO: understand why slock code has fork */
+
+
+    println!("Exited readpw");
+}
 }
