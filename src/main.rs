@@ -1,8 +1,8 @@
-#![allow(unused_variables)]
 extern crate x11;
 extern crate pwd;
 extern crate libc;
 extern crate crypto;
+extern crate docopt;
 
 mod config;
 
@@ -14,10 +14,12 @@ use structs::{
 mod structs;
 
 use keys::{
-    Key,
     get_key_type,
 };
 mod keys;
+
+use arg::USAGE;
+mod arg;
 
 use std::ptr;
 
@@ -33,6 +35,8 @@ use std::ffi::CString;
 
 use std::cmp::Ordering;
 
+use std::env::args;
+
 use crypto::digest::Digest;
 use crypto::md5::Md5;
 
@@ -46,6 +50,8 @@ use libc::{
     gid_t,
     usleep,
 };
+
+use docopt::Docopt;
 
 #[derive(Copy, Clone, Debug)]
 enum Color {
@@ -184,16 +190,18 @@ fn lockscreen(dpy: *mut Display, rr: Xrandr, screen: i32, colors: HashMap<u32, S
 
     unsafe {
         lock.root = XRootWindow(dpy, screen);
+        let default_cmap = XDefaultColormap(dpy, screen);
         for i in 0..Color::NUMCOLS as u32 {
             XAllocNamedColor(
                 dpy,
-                XDefaultColormap(dpy, screen),
+                default_cmap,
                 getvalue(i, colors.clone()).as_ptr() as *const i8,
                 &mut screen_def_return,
                 &mut exact_def_return);
             lock.colors.push(screen_def_return.pixel);
             println!("{:?}", screen_def_return);
         }
+
         /* init */
 
         let mut wa = XSetWindowAttributes::new();
@@ -389,13 +397,17 @@ fn readpw(dpy: *mut Display, rr: Xrandr, locks: Vec<Lock>, actual_hash: String, 
 fn main() {
     let mut rr = Xrandr::new();
     let grp: *mut group;
-    let duid: uid_t;
-    let dgid: gid_t;
     let hash: String;
     let dpy: *mut Display;
     let nscreens: i32;
 
     /* TODO: add command line arguments functionality to change password */
+
+    let args = Docopt::new(USAGE)
+                        .and_then(|d| d.parse())
+                        .unwrap_or_else(|e| e.exit());
+
+    println!("{:?}", args);
 
     hash = getpw();
 
