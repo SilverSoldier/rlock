@@ -15,8 +15,8 @@ pub struct Lock {
     pub colors: Vec<u64>,
 }
 
-impl Lock {
-    pub fn new() -> Lock {
+impl Constructor for Lock {
+    fn new() -> Lock {
         Lock { 
             screen: 0,
             root: 0,
@@ -34,8 +34,8 @@ pub struct Xrandr {
     pub errbase: i32,
 }
 
-impl Xrandr {
-    pub fn new() -> Xrandr {
+impl Constructor for Xrandr {
+    fn new() -> Xrandr {
         Xrandr { active: 0, evbase: 0, errbase: 0 }
     }
 }

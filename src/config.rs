@@ -25,7 +25,7 @@ pub fn getusername() -> String {
     let username: String;
     unsafe{
         let name = getenv(CString::new("USER").unwrap().as_ptr());
-        username= CStr::from_ptr(name).to_string_lossy().into_owned();
+        username = CStr::from_ptr(name).to_string_lossy().into_owned();
     }
     username
 }
@@ -35,8 +35,8 @@ fn createdefaultconfig() -> HashMap<u32, String> {
 
     let colors = map!{ 
         0 /* Init */ => "black".to_string(),
-        1 /* Input */ => "blue".to_string(),
-        2 /* Failed */ => "red".to_string()
+        1 /* Input */ => "#005577".to_string(),
+        2 /* Failed */ => "#CC3333".to_string()
     };
 
     /* TODO:  Write to file */
