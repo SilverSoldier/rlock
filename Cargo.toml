@@ -1,0 +1,11 @@
+[package]
+name = "rlock"
+version = "0.1.0"
+authors = ["kavya <soldatargent@gmail.com>"]
+
+[dependencies]
+x11 = {version="2.7.0", features = ["xlib", "xrandr"]}
+pwd = "1.2.0"
+libc = "0.2.34"
+rust-crypto = "^0.2"
+docopt = "^0.8"
