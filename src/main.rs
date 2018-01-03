@@ -428,7 +428,7 @@ fn main() {
         /* Get number of screens from dpy and blank them */
         nscreens = XScreenCount(dpy);
         let mut locks: Vec<Lock> = Vec::new();
-        let colors = config::readconfig();
+        let colors = config::read_config();
 
         for s in 0..nscreens {
 
@@ -454,7 +454,5 @@ fn main() {
         /* run post-lock command */
         /* TODO: understand why slock code has fork */
 
-
-    println!("Exited readpw");
-}
+    }
 }
