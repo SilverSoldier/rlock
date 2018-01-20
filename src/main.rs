@@ -176,8 +176,6 @@ fn lockscreen(dpy: *mut Display, rr: Xrandr, screen: i32, colors: HashMap<u32, S
         return (Lock::new(), false);
     } 
 
-    let mut screen_def_return = XColor::new();
-    let mut exact_def_return = XColor::new();
     let mut ptgrab = -1;
     let mut kbgrab = -1;
 
@@ -190,7 +188,9 @@ fn lockscreen(dpy: *mut Display, rr: Xrandr, screen: i32, colors: HashMap<u32, S
         lock.root = XRootWindow(dpy, screen);
         let default_cmap = XDefaultColormap(dpy, screen);
         for i in 0..Color::NUMCOLS as u32 {
-            // println!("{:?}", getvalue(i, colors.clone()));
+            let mut screen_def_return = XColor::new();
+            let mut exact_def_return = XColor::new();
+            println!("{:?}", getvalue(i, colors.clone()));
             let err = XAllocNamedColor(
                 dpy,
                 default_cmap,
@@ -198,7 +198,7 @@ fn lockscreen(dpy: *mut Display, rr: Xrandr, screen: i32, colors: HashMap<u32, S
                 &mut screen_def_return,
                 &mut exact_def_return);
             lock.colors.push(screen_def_return.pixel);
-            // println!("Err: {}, {:?}", err, screen_def_return);
+            println!("Err: {}, {:?}", err, screen_def_return);
         }
 
         /* init */
@@ -224,6 +224,14 @@ fn lockscreen(dpy: *mut Display, rr: Xrandr, screen: i32, colors: HashMap<u32, S
 
         lock.pmap = XCreateBitmapFromData(dpy, lock.win, curs.as_ptr(), 8, 8);
 
+        let mut screen_def_return = XColor::new();
+        let mut exact_def_return = XColor::new();
+        XAllocNamedColor(
+            dpy,
+            default_cmap,
+            getvalue(0, colors.clone()).as_ptr() as *const i8,
+            &mut screen_def_return,
+            &mut exact_def_return);
         let invisible = XCreatePixmapCursor(dpy, lock.pmap, lock.pmap, &mut screen_def_return, &mut screen_def_return, 0, 0);
 
         XDefineCursor(dpy, lock.win, invisible);
@@ -243,7 +251,7 @@ fn lockscreen(dpy: *mut Display, rr: Xrandr, screen: i32, colors: HashMap<u32, S
                     0,
                     invisible,
                     CurrentTime)
-                
+
             }
 
             if kbgrab != GrabSuccess {
@@ -261,7 +269,7 @@ fn lockscreen(dpy: *mut Display, rr: Xrandr, screen: i32, colors: HashMap<u32, S
             /* Input is grabbed, we can lock the screen */
 
             if ptgrab == GrabSuccess && kbgrab == GrabSuccess {
-            
+
                 if !keyboard_only {
                     XMapRaised(dpy, lock.win);
                 }
@@ -276,8 +284,8 @@ fn lockscreen(dpy: *mut Display, rr: Xrandr, screen: i32, colors: HashMap<u32, S
             /* Retry on AlreadyGrabbed, fail on other errors */
             if (ptgrab != AlreadyGrabbed && ptgrab != GrabSuccess) ||
                 (kbgrab != AlreadyGrabbed && kbgrab != GrabSuccess) {
-                break;
-            }
+                    break;
+                }
 
             usleep(100000);
         }

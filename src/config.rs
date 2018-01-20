@@ -44,7 +44,8 @@ fn create_color_map(init: &str, input: &str, failed: &str) -> HashMap<u32, Strin
 
 fn create_default_config() -> HashMap<u32, String> {
     /* Create the default config */
-    create_color_map("#FFFFFF", "#005577", "#CC3333")
+    println!("Used default config");
+    create_color_map("black", "#006400", "#8B0000")
 }
 
 pub fn parse_contents(mut contents: String) -> HashMap<u32, String> {
@@ -85,6 +86,7 @@ pub fn read_config() -> HashMap<u32, String> {
 
     match File::open(path) {
         Ok(f) => { 
+            println!("Reading from config");
             let mut file = f;
             let mut contents = String::new();
             match file.read_to_string(&mut contents) {

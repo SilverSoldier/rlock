@@ -1,3 +1,4 @@
+/* Module for handling the command line arguments facility */
 extern crate docopt;
 
 /* Defining a USAGE string */
